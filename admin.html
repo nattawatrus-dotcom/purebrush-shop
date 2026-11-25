@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจัดการคลังสินค้า: Picking & Packing - PUREBRUSH</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Prompt', sans-serif; }
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea { position: fixed; left: 0; top: 0; width: 100%; border: 2px solid #000; padding: 24px; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+  <!-- Navbar -->
+  <div class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
+    <div>
+      <h1 class="text-lg md:text-xl font-bold">🏭 ระบบคลังสินค้า: หยิบสินค้า (Picking) & แพ็คพัสดุ (Packing)</h1>
+      <p class="text-xs text-slate-400">เชื่อมต่อฐานข้อมูล Google Sheets (Orders & Products)</p>
+    </div>
+    <div class="space-x-2">
+      <button onclick="loadAllData()" class="bg-teal-600 px-3 py-1.5 rounded-lg text-sm hover:bg-teal-700">🔄 รีเฟรชข้อมูล</button>
+      <a href="index.html" class="bg-slate-700 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-600">กลับหน้าร้าน</a>
+    </div>
+  </div>
+
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+
+    <!-- ส่วนสรุปรายการหยิบสินค้า (Consolidated Picking Summary) -->
+    <div class="bg-white p-5 rounded-xl shadow border-l-4 border-amber-500">
+      <h2 class="font-bold text-base mb-3 text-slate-800">📋 สรุปรายการสินค้าที่ต้องหยิบจากคลัง (Picking Summary - เฉพาะออเดอร์ที่รอหยิบ)</h2>
+      <div id="pickingSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div class="text-slate-400">กำลังคำนวณรายการหยิบสินค้า...</div>
+      </div>
+    </div>
+
+    <!-- ตารางจัดการออเดอร์ (Picking -> Packing -> Label) -->
+    <div class="bg-white rounded-xl shadow overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="bg-slate-200 text-slate-700 text-xs uppercase">
+            <th class="p-4">Order ID / เวลาสั่ง</th>
+            <th class="p-4">รายการสินค้า (Pick Item)</th>
+            <th class="p-4">ข้อมูลผู้รับ (ปลายทาง)</th>
+            <th class="p-4">ยอดชำระ</th>
+            <th class="p-4">สถานะปัจจุบัน</th>
+            <th class="p-4 text-center">ขั้นตอนการทำงาน (Workflow)</th>
+          </tr>
+        </thead>
+        <tbody id="orderTableBody" class="divide-y divide-slate-200 text-sm">
+          <tr><td colspan="6" class="p-8 text-center text-slate-400">กำลังโหลดข้อมูลคำสั่งซื้อ...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal ใบจ่าหน้าพัสดุ (Packing Slip & Shipping Label) -->
+  <div id="labelModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full p-6 shadow-2xl">
+      <div class="flex justify-between items-center mb-4 no-print">
+        <h3 class="text-lg font-bold">🏷️ ใบจ่าหน้าพัสดุและใบรายการแพ็คสินค้า</h3>
+        <button onclick="closeModal()" class="text-2xl text-slate-400 hover:text-slate-700">&times;</button>
+      </div>
+
+      <div id="printArea" class="border-2 border-slate-900 p-6 rounded-lg bg-white">
+        <div class="flex justify-between items-start border-b-2 border-slate-900 pb-3 mb-4">
+          <div>
+            <p class="font-bold text-lg">ผู้ส่ง: PUREBRUSH WAREHOUSE</p>
+            <p class="text-xs">99/9 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110</p>
+            <p class="text-xs">โทร: 02-999-9999</p>
+          </div>
+          <div class="text-right">
+            <span class="border-2 border-slate-900 px-2.5 py-1 font-bold text-sm" id="lblOrderId"></span>
+            <p class="text-xs mt-1.5" id="lblDate"></p>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <p class="text-xs font-bold uppercase text-slate-500">กรุณาส่ง (TO):</p>
+          <p class="text-xl font-bold mt-0.5" id="lblName"></p>
+          <p class="text-base font-semibold" id="lblPhone"></p>
+          <p class="text-sm mt-1 leading-relaxed" id="lblAddress"></p>
+        </div>
+
+        <div class="border-t-2 border-dashed border-slate-400 pt-3 bg-slate-50 p-3 rounded">
+          <p class="text-xs font-bold text-slate-600 uppercase">รายการสินค้าสำหรับตรวจสอบก่อนปิดกล่อง (Packing Check):</p>
+          <p class="text-sm font-bold mt-1" id="lblItem"></p>
+          <p class="text-sm mt-1">ยอดชำระสุทธิ: <span class="font-bold" id="lblPrice"></span></p>
+        </div>
+      </div>
+
+      <div class="mt-6 flex justify-end space-x-3 no-print">
+        <button onclick="closeModal()" class="px-4 py-2 border rounded-lg hover:bg-slate-100">ปิดหน้าต่าง</button>
+        <button onclick="window.print()" class="bg-blue-600 text-white px-5 py-2 rounded-lg font-bold hover:bg-blue-700">🖨️ พิมพ์ใบจ่าหน้าพัสดุ</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // *** วาง Web App URL จาก Google Apps Script ที่นี่ ***
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwAzycPaqKyfLEhUUiDwu4vSEWfaq_tRdr8qONlPCnuhiVrCF70gLI1mMnBOFDoBso5/exec";
+    let ordersData = [];
+
+    function loadAllData() {
+      fetch(SCRIPT_URL + "?type=orders")
+        .then(res => res.json())
+        .then(data => {
+          ordersData = data.reverse();
+          renderPickingSummary();
+          renderTable();
+        });
+    }
+
+    function renderPickingSummary() {
+      const summaryBox = document.getElementById('pickingSummary');
+      const toPickOrders = ordersData.filter(o => o.Status && o.Status.includes("รอหยิบสินค้า"));
+      
+      if (toPickOrders.length === 0) {
+        summaryBox.innerHTML = `<div class="col-span-3 text-emerald-700 font-medium">✅ หยิบสินค้าครบทุกรายการแล้ว ไม่มีรายการค้างหยิบ</div>`;
+        return;
+      }
+
+      const counts = {};
+      toPickOrders.forEach(o => {
+        counts[o.SKU] = (counts[o.SKU] || 0) + Number(o.Quantity);
+      });
+
+      summaryBox.innerHTML = Object.entries(counts).map(([sku, qty]) => `
+        <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg flex justify-between items-center">
+          <span class="font-semibold text-slate-800">${sku}</span>
+          <span class="bg-amber-500 text-white font-bold px-3 py-1 rounded-full text-xs">หยิบ ${qty} ชิ้น</span>
+        </div>
+      `).join('');
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('orderTableBody');
+      if (ordersData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-400">ยังไม่มีคำสั่งซื้อในระบบ</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = ordersData.map((order, index) => {
+        const status = order.Status || "";
+        const isToPick = status.includes("รอหยิบสินค้า");
+        const isPicked = status.includes("หยิบสินค้าแล้ว");
+        const isPacked = status.includes("แพ็คแล้ว");
+
+        let badgeClass = "bg-amber-100 text-amber-800";
+        if (isPicked) badgeClass = "bg-blue-100 text-blue-800";
+        if (isPacked) badgeClass = "bg-emerald-100 text-emerald-800";
+
+        return `
+          <tr class="hover:bg-slate-50">
+            <td class="p-4">
+              <div class="font-bold text-slate-900">${order.OrderID}</div>
+              <div class="text-xs text-slate-500">${order.Timestamp}</div>
+            </td>
+            <td class="p-4">
+              <div class="font-semibold text-teal-700">${order.SKU}</div>
+              <div class="text-xs bg-slate-200 text-slate-800 inline-block px-2 py-0.5 rounded font-bold mt-1">จำนวน: ${order.Quantity} ชิ้น</div>
+            </td>
+            <td class="p-4 max-w-xs">
+              <div class="font-bold">${order.CustomerName} (${order.Phone})</div>
+              <div class="text-xs text-slate-600 mt-1">${order.Address}</div>
+            </td>
+            <td class="p-4 font-bold">${Number(order.TotalPrice).toLocaleString()} ฿</td>
+            <td class="p-4">
+              <span class="px-2.5 py-1 rounded-full text-xs font-bold ${badgeClass}">${status}</span>
+            </td>
+            <td class="p-4 space-y-1.5">
+              ${isToPick ? `
+                <button onclick="updateOrderStatus('${order.OrderID}', '2. หยิบสินค้าแล้ว (Picked - รอแพ็ค)')" class="w-full bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded text-xs font-semibold">
+                  🖐️ 1. ยืนยันหยิบสินค้า (Pick)
+                </button>
+              ` : ''}
+              
+              <button onclick="openShippingLabel(${index})" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold">
+                🏷️ พิมพ์ใบจ่าหน้าพัสดุ
+              </button>
+
+              ${!isPacked ? `
+                <button onclick="updateOrderStatus('${order.OrderID}', '3. แพ็คแล้ว / พร้อมจัดส่ง (Packed)')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-semibold">
+                  📦 2. ยืนยันแพ็คสินค้าเสร็จ (Pack)
+                </button>
+              ` : ''}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function updateOrderStatus(orderId, newStatus) {
+      fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: "updateStatus", orderId: orderId, status: newStatus })
+      })
+      .then(res => res.json())
+      .then(() => {
+        loadAllData();
+      });
+    }
+
+    function openShippingLabel(index) {
+      const order = ordersData[index];
+      document.getElementById('lblOrderId').innerText = order.OrderID;
+      document.getElementById('lblDate').innerText = order.Timestamp;
+      document.getElementById('lblName').innerText = order.CustomerName;
+      document.getElementById('lblPhone').innerText = "โทร: " + order.Phone;
+      document.getElementById('lblAddress').innerText = order.Address;
+      document.getElementById('lblItem').innerText = `${order.SKU} (จำนวน ${order.Quantity} ชิ้น)`;
+      document.getElementById('lblPrice').innerText = `${Number(order.TotalPrice).toLocaleString()} บาท`;
+
+      document.getElementById('labelModal').classList.remove('hidden');
+      document.getElementById('labelModal').classList.add('flex');
+    }
+
+    function closeModal() {
+      document.getElementById('labelModal').classList.add('hidden');
+      document.getElementById('labelModal').classList.remove('flex');
+    }
+
+    loadAllData();
+  </script>
+</body>
+</html>
